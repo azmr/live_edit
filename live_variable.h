@@ -5,6 +5,7 @@ TODO:
  - add "Leave Empty" comment under macro lists
  - allow types to be specified elsewhere?
  - observe arrays
+ - construct format strings from e.g. nested structs
 */
 
 #ifndef LIVE_VARIABLE_H
@@ -40,27 +41,25 @@ typedef int debug_if;
 #define DEBUG_OBSERVED_COUNTER __COUNTER__
 debug_variable DebugObservedVariables[];
 static unsigned int DebugObservedCount = 0;
-unsigned int DebugObservedArrayLen;
+static unsigned int DebugObservedArrayLen;
 
 /* Usage:    int X = 6;    =>    DEBUG_OBSERVE(int, X) = 6;    */
 /* TODO: do `if` and swap as atomic operation */
-#define DEBUG_OBSERVE(type, name) \
-static type name; \
-{ \
-	static int DebugObserved_## name ##_NeedsInit = 1; \
-	if(DebugObserved_## name ##_NeedsInit) { DEBUG_OBSERVED_COUNTER; \
-		DebugObserved_## name ##_NeedsInit = 0; \
-		debug_variable DebugObserved = { DebugVarType_## type, #name, &name }; \
-		DebugObservedVariables[++DebugObservedCount] = DebugObserved; \
-	} \
-} \
-name
+#define DEBUG_OBSERVE_INTERNALS(type, name, var) \
+static int DebugObserved_## var ##_NeedsInit = 1; \
+if(DebugObserved_## var ##_NeedsInit) { DEBUG_OBSERVED_COUNTER; \
+	DebugObserved_## var ##_NeedsInit = 0; \
+	debug_variable DebugObserved = { DebugVarType_## type, name, &var }; \
+	DebugObservedVariables[++DebugObservedCount] = DebugObserved; \
+}
+#define DEBUG_OBSERVE(type, name)        static type name; { DEBUG_OBSERVE_INTERNALS(type, #name,         name) } name
+#define DEBUG_OBSERVED(type, path, name) static type name; { DEBUG_OBSERVE_INTERNALS(type, #path"_"#name, name) } name
 /* ^^^ this has the feature that it doesn't trigger a warning if unused elsewhere */
 
 #define DEBUG_OBSERVED_DECLARATION  \
 	enum { DebugObservedArrayLenEnum = DEBUG_OBSERVED_COUNTER + 1 }; \
 	debug_variable DebugObservedVariables[DebugObservedArrayLenEnum]; \
-	unsigned int DebugObservedArrayLen = DebugObservedArrayLenEnum;
+	static unsigned int DebugObservedArrayLen = DebugObservedArrayLenEnum;
 /* NOTE: 0 is free for invalid queries */
 #define DEBUG_OBSERVED_H
 #endif/*DEBUG_OBSERVED_H*/
@@ -98,7 +97,7 @@ typedef struct debug_variable
 	} Type;
 	char *Name;
 	union {
-		void *Data;
+		void *Data; // are these below really needed?
 #define DEBUG_TYPE(type, format) \
 		type *Value_## type;
 		DEBUG_LIVE_TYPES
@@ -111,13 +110,16 @@ typedef struct debug_variable
 
 /* //// Reference debug array instances by name */
 enum {
+	DebugLiveVarIndexEmpty,
 #if !NO_VA_ARGS
 #define DEBUG_LIVE_STRUCT(type, Name, ...) DebugVarIndex_## Name,
 #endif/*!NO_VA_ARGS */
-#define DEBUG_LIVE_VAR(type, Name, init) DebugVarIndex_## Name,
+#define DEBUG_LIVE_VAR(type, Name, init)   DebugVarIndex_## Name,
 	DEBUG_LIVE_VARS
 #undef DEBUG_LIVE_VAR
 #undef DEBUG_LIVE_STRUCT
+	DebugLiveCountPlusOne,
+	DebugLiveCount = DebugLiveCountPlusOne - 2,
 };
 
 
@@ -132,11 +134,11 @@ enum {
 
 /* //// Array of annotated typed pointers to global vars */
 debug_variable DebugLiveVariables[] = {
+	{0},
 #if !NO_VA_ARGS
 #define DEBUG_LIVE_STRUCT(type, Name, ...) { DebugVarType_## type, #Name, (void *)&DEBUG_LIVE_VAR_## Name },
 #endif/*!NO_VA_ARGS */
-#define DEBUG_LIVE_VAR(type, Name, init) { DebugVarType_## type, #Name, (void *)&DEBUG_LIVE_VAR_## Name },
-	/* NOTE: ^^^ only sets the first type listed (suggested integral type for toggling) */
+#define DEBUG_LIVE_VAR(type, Name, init)   { DebugVarType_## type, #Name, (void *)&DEBUG_LIVE_VAR_## Name },
 		DEBUG_LIVE_VARS
 #undef DEBUG_LIVE_VAR
 #if !NO_VA_ARGS
@@ -203,23 +205,9 @@ DebugLiveVar_RewriteConfig(char *Filename)
 	if(! DebugLiveVar_IsCompiling)
 	{
 		FILE *File = fopen(Filename, "w");
-		Result &= fprintf(File, "#ifndef LIVE_VAR_CONFIG_H\n\n#define DEBUG_TYPES \\\n") > 0;
-#if ! NO_VA_ARGS
-#define DEBUG_LIVE_MEMBER(struct, member) Var.Value_## struct.member
-#define DEBUG_TYPE_STRUCT(type, format, ...) \
-		Result &= fputs("\tDEBUG_TYPE_STRUCT("#type", "#format", "#__VA_ARGS__") \\\n", File) >= 0;
-#endif/*! NO_VA_ARGS */
-#define DEBUG_TYPE(type, format) \
-		Result &= fputs("\tDEBUG_TYPE("#type", "#format") \\\n", File) >= 0;
-		DEBUG_TYPES
-#undef DEBUG_TYPE
-#if ! NO_VA_ARGS
-#undef DEBUG_TYPE_STRUCT
-#undef DEBUG_LIVE_MEMBER
-#endif/*! NO_VA_ARGS */
+		Result &= fprintf(File, "#ifndef LIVE_VAR_CONFIG_H\n\n#define DEBUG_LIVE_VARS \\\n") > 0;
 
-			Result &= fprintf(File, "\n\n#define DEBUG_LIVE_VARS \\\n") > 0;
-		for(u32 iVar = 0; iVar < ArrayCount(DebugLiveVariables); ++iVar)
+		for(u32 iVar = 1; iVar < ArrayCount(DebugLiveVariables); ++iVar)
 		{
 			debug_variable Var = DebugLiveVariables[iVar];
 			switch(Var.Type)

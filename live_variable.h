@@ -2,6 +2,7 @@
 TODO:
  - better accommodate C89, e.g. with STRUCT2, STRUCT3 etc
  - add known types first time (like DEBUG_LIVE_IF)
+ - add C basic types
  - add "Leave Empty" comment under macro lists
  - allow types to be specified elsewhere?
  - observe arrays
@@ -178,7 +179,7 @@ DebugLiveVar_RewriteDefines(char *Filename)
 			switch(Var.Type)
 			{
 #if ! NO_VA_ARGS
-#define DEBUG_LIVE_MEMBER(struct, member) Var.Value_## struct->member
+#define DEBUG_TYPE_MEMBER(struct, member) Var.Value_## struct->member
 #define DEBUG_TYPE_STRUCT(type, format, ...) case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, __VA_ARGS__) > 0; break;
 #endif/*! NO_VA_ARGS */
 #define DEBUG_TYPE(type, format)		case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, *Var.Value_## type) > 0; break;
@@ -186,7 +187,7 @@ DebugLiveVar_RewriteDefines(char *Filename)
 #undef DEBUG_TYPE
 #if ! NO_VA_ARGS
 #undef DEBUG_TYPE_STRUCT
-#undef DEBUG_LIVE_MEMBER
+#undef DEBUG_TYPE_MEMBER
 #endif/*NO_VA_ARGS == 0 */
 			}
 		}
@@ -214,7 +215,7 @@ DebugLiveVar_RewriteConfig(char *Filename)
 			{
 				case DebugVarType_debug_if: Result &= fprintf(File, "\tDEBUG_LIVE_IF(%s, %u) \\\n", Var.Name, *Var.Value_debug_if) > 0; break;
 #if ! NO_VA_ARGS
-#define DEBUG_LIVE_MEMBER(struct, member) Var.Value_## struct->member
+#define DEBUG_TYPE_MEMBER(struct, member) Var.Value_## struct->member
 #define DEBUG_TYPE_STRUCT(type, format, ...) \
 				case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_LIVE_STRUCT("#type", %s, "format") \\\n", Var.Name, __VA_ARGS__) > 0; break;
 #endif/*! NO_VA_ARGS */
@@ -224,7 +225,7 @@ DebugLiveVar_RewriteConfig(char *Filename)
 #undef DEBUG_TYPE
 #if ! NO_VA_ARGS
 #undef DEBUG_TYPE_STRUCT
-#undef DEBUG_LIVE_MEMBER
+#undef DEBUG_TYPE_MEMBER
 #endif/*! NO_VA_ARGS */
 			}
 		}

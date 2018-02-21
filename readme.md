@@ -4,12 +4,12 @@ _A collection of single-header libraries to help with reloading, debugging and p
 ## Contents
 - [Acknowledgments](#acknowledgments)
 - [Overview of headers](#overview-of-headers)
-- [win32_live_edit.h](#win32_live_edit-h)
-- [win32_loop_edit.h](#win32_loop_edit-h)
-- [live_variable.h](#live_variable-h)
+- [win32_live_edit.h](#win32_live_edith)
+- [win32_loop_edit.h](#win32_loop_edith)
+- [live_variable.h](#live_variableh)
 	- [DEBUG_OBSERVE](#debug_observe)
 	- [DEBUG_LIVE](#debug_live)
-- [hierarchy.h](#hierarchy-h)
+- [hierarchy.h](#hierarchyh)
 
 ## Acknowledgments
 Most of the content here used Casey Muratori's [Handmade Hero](https://www.handmadehero.org) as a starting point.

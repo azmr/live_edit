@@ -30,10 +30,10 @@ typedef struct debug_hierarchy_el
 	struct debug_hierarchy_el *NextSibling;
 	union {
 		void *Data;
-		unsigned int IsClosed;
-/* #define DEBUG_HIERARCHY_TYPE(type, ...) DebugHierarchyValue_## type, */
-	/* 	DEBUG_HIERARCHY_TYPES */
-/* #undef DEBUG_HIERARCHY_TYPE */
+		int IsClosed;
+#define DEBUG_HIERARCHY_KIND(type, kind) type *kind;
+		DEBUG_HIERARCHY_KINDS
+#undef  DEBUG_HIERARCHY_KIND
 	};
 } debug_hierarchy_el;
 
@@ -147,20 +147,16 @@ DebugHierarchy_InitElement(char *Name, void *Data, int Kind)
 	debug_hierarchy_el Group = {0};
 	for(char *At = Name; *At; ++At)
 	{
-		if(*At == '_' )
+		if(*At == '_' && Group.NameLength && At[1]) // not the end of the string or repeated '_'
 		{
-			if(Group.NameLength && At[1])
-			{
-				Group.Name = LevelName;
-				if(DebugHierarchy_AddUniqueEl(DebugHierarchy, &DebugHierarchyCount,
-											  DebugHierarchy_ArrayLen, Group, &Group.Parent))
-				{
-					DebugHierarchy_AppendChild(Group.Parent->Parent, Group.Parent);
-				}
+			Group.Name = LevelName;
+			if(DebugHierarchy_AddUniqueEl(DebugHierarchy, &DebugHierarchyCount,
+						DebugHierarchy_ArrayLen, Group, &Group.Parent))
+			{ DebugHierarchy_AppendChild(Group.Parent->Parent, Group.Parent); }
 
-				while(*++At == '_');
-				LevelName = At;
-			}
+			while(*++At == '_');
+			LevelName = At;
+			Group.NameLength = 1;
 		}
 		else
 		{

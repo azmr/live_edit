@@ -1,6 +1,16 @@
 # Live Edit
 _A collection of single-header libraries to help with reloading, debugging and profiling C(++) code._
 
+## Contents
+- [Acknowledgments](#acknowledgments)
+- [Overview of headers](#overview-of-headers)
+- [win32_live_edit.h](#win32_live_edit-h)
+- [win32_loop_edit.h](#win32_loop_edit-h)
+- [live_variable.h](#live_variable-h)
+	- [DEBUG_OBSERVE](#debug_observe)
+	- [DEBUG_LIVE](#debug_live)
+- [hierarchy.h](#hierarchy-h)
+
 ## Acknowledgments
 Most of the content here used Casey Muratori's [Handmade Hero](https://www.handmadehero.org) as a starting point.
 It is an invaluable resource for those looking to understand and write low-level code.
@@ -9,6 +19,11 @@ maybe chip in a few quid/dollars, then come back here. I'll wait.
 
 I've put some relevant links in each section.
 My implementations have diverged somewhat, but the concepts are mostly the same.
+
+One major difference is that these will work with C.
+(They're not all C89-compatible, as some of the implementations require declare-anywhere and/or `__VA_ARGS__`.
+Some aren't C89-compatible just because I haven't taken the time to make them so.
+File an issue or a pull request if you want this changed.)
 
 ## Overview of headers
 All of these can be used standalone, but they also work well together.

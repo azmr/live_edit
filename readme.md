@@ -7,8 +7,8 @@ _A collection of single-header libraries to help with reloading, debugging and p
 - [win32_live_edit.h](#win32_live_edith)
 - [win32_loop_edit.h](#win32_loop_edith)
 - [live_variable.h](#live_variableh)
-	- [DEBUG_OBSERVE](#debug_observe)
-	- [DEBUG_LIVE](#debug_live)
+    - [DEBUG_WATCH](#debug_watch)
+    - [DEBUG_TWEAK](#debug_tweak)
 - [hierarchy.h](#hierarchyh)
 
 ## Acknowledgments
@@ -29,7 +29,7 @@ File an issue or a pull request if you want this changed.)
 All of these can be used standalone, but they also work well together.
 - `win32_live_edit.h` - reloading DLL code while running (requires a platform and client layer, see video linked above). Currently Windows only.
 - `win32_loop_edit.h` - (needs updating) - capture input for a set period of time, reset the system state to the start, and loop over, e.g. for tweaking small changes in timing-sensitive code. Currently Windows only.
-- `live_variable.h` - introducing `DEBUG_OBSERVE()` and `DEBUG_LIVE()` for watching and tweaking variables (respectively) from the application. Also useful for toggling code, similar to `#if 0/#else/#endif`.
+- `live_variable.h` - introducing `DEBUG_WATCH()` and `DEBUG_TWEAK()` for watching and tweaking variables (surprisingly!) from the application. Also `DEBUG_LIVE_IF()`, useful for toggling code, similar to `#if 0` blocks.
 - `hierarchy.h` - used for sorting arbitrary debug data into a hierarchy/tree structure.
 *TODO: add`profiling.h`*
 
@@ -89,8 +89,8 @@ Casey experiments with multiple implementations doing something vaguely similar 
 [Day 255: Building a Profile Tree](https://hero.handmade.network/episode/code/day255/).
 I think most of the stuff similar to this is in the 212-214 range.
 
-### `DEBUG_OBSERVE`
-OBSERVE is there to minimize the friction involved with inspecting the state of the system.
+### `DEBUG_WATCH`
+WATCH is there to minimize the friction involved with inspecting the state of the system.
 ``` c
 // "main.c"
 #define DEBUG_TYPES \
@@ -100,13 +100,13 @@ OBSERVE is there to minimize the friction involved with inspecting the state of 
 #include "path/to/live_variable.h"    // as long as the types are defined first
 // ...
 
-DEBUG_OBSERVE(f32, X) = 6.2f;    // previously: `f32 X = 6.2f;`
+DEBUG_WATCH(f32, X) = 6.2f;    // previously: `f32 X = 6.2f;`
 // Tag the variable with a path without affecting its local name (mostly for interaction with `hierarchy.h`):
-DEBUG_OBSERVED(v2, Category_Name, Vec) = { 1.f, 0.f };
+DEBUG_WATCHED(v2, Category_Name, Vec) = { 1.f, 0.f };
 // ...
 
-for(unsigned int i = 1; i <= DebugObservedCount; ++i) {
-    debug_variable Var = DebugObservedVariables[i];
+for(unsigned int i = 1; i <= DebugWatchCount; ++i) {
+    debug_variable Var = DebugWatchVariables[i];
     switch(Var->Type) { // you can do fancy things with the DEBUG_TYPES macro, but let's K.I.S.S. here
         case DebugVarType_f32: printf("%f\n", *(f32 *)Var.Data); break;
 
@@ -117,18 +117,18 @@ for(unsigned int i = 1; i <= DebugObservedCount; ++i) {
     }
 }
 
-// ... after the final function that uses DEBUG_OBSERVE. (In the global space)
-DEBUG_OBSERVED_DECLARATION
+// ... after the final function that uses DEBUG_WATCH. (In the global space)
+DEBUG_WATCH_DECLARATION
 ```
 
-### `DEBUG_LIVE`
-LIVE is a bit more involved than OBSERVE, but you get a bit more from it: you can edit values and save them between compiles. This is primarily for toggling code sections and tweaking values.
+### `DEBUG_TWEAK`
+TWEAK is a bit more involved than WATCH, but you get a bit more from it: you can edit values and save them between compiles. This is primarily for toggling code sections and tweaking values.
 ``` c
 // "main.c"
 #define DEBUG_TYPES \
     DEBUG_TYPE(bool32, "%d") \
     DEBUG_TYPE(f32, "%ff") \
-    DEBUG_TYPE(v2, "{ %ff, %ff }", DEBUG_STRUCT(DEBUG_MEMBER(v2, X), DEBUG_MEMBER(v2, Y)))
+    DEBUG_TYPE_STRUCT(v2, "{ %ff, %ff }", DEBUG_MEMBER(v2, X), DEBUG_MEMBER(v2, Y))
 
 #include "main_live.h"
 /***/
@@ -137,26 +137,29 @@ LIVE is a bit more involved than OBSERVE, but you get a bit more from it: you ca
 // using the format specifiers above
 #define DEBUG_LIVE_VARS \
     DEBUG_LIVE_IF(RenderBadly, 0) \
-    DEBUG_LIVE_VAR(f32, TestFloat, 999.000000f) \
-    DEBUG_LIVE_STRUCT(v2, TestV2, { 2381.000000f, 303.450000f }) \
+    DEBUG_LIVE_TWEAK(f32, TestFloat, 999.000000f) \
+    DEBUG_LIVE_TWEAK(v2, TestV2, { 2381.000000f, 303.450000f }) \
     /* important empty space here */
 #include "path/to/live_variable.h"
 /***/
 
 // "main.c"
 // important type definitions...
-#define DEBUG_LIVE_IMPLEMENTATION
+#define DEBUG_TWEAK_IMPLEMENTATION
 #include "path/to/live_variable.h"
 // ...
 
-DEBUG_IF(RenderBadly) { // ... lots of things } // use just like normal if statement
+DEBUG_LIVE_if(RenderBadly) { // ... lots of things } // use just like normal if statement
 else { RenderWell(); }
 printf("%f\n", TestFloat);
 v2 NewVector = V2Add(SomeV2, TestV2);
 //...
 for(unsigned int i = 0; i <= 9 && i <= DebugLiveCount; ++i) {
     if(WasPressed(Numpad[i])) {
-        ChangeValueSomehow(DebugLiveVariables[i+1]);
+        debug_variable Var = &DebugLiveVariables[i+1];
+        switch(Var->Type) {
+            //...
+        }
         ChangesMade = 1;
     }
 }
@@ -170,19 +173,19 @@ but if I remember right it's fairly dependent on its context.
 I don't think I referenced it when writing my own.
 
 ``` c
-#define DEBUG_HIERARCHY_TYPES \
-    DEBUG_HIERARCHY_TYPE(debug_variable, Live) \
-    DEBUG_HIERARCHY_TYPE(debug_variable, Observed)
+#define DEBUG_HIERARCHY_KINDS \
+    DEBUG_HIERARCHY_KIND(debug_variable, Tweak) \
+    DEBUG_HIERARCHY_KIND(debug_variable, Watch)
 #include "path/to/hierarchy.h"
 //...
 
-for(unsigned int i = 1; i <= DebugLiveCount; ++i) {
-    debug_variable *Var = &DebugLiveVariables[i];
-    DebugHierarchy_InitElement(Var->Name, Var, DebugHierarchyKind_Live);
+for(unsigned int i = 1; i <= DebugTweakCount; ++i) {
+    debug_variable *Var = &DebugTweakVariables[i];
+    DebugHierarchy_InitElement(Var->Name, Var, DebugHierarchyKind_Tweak);
 }
-for(unsigned int i = 1; i <= DebugObservedCount; ++i) {
-    debug_variable *Var = &DebugObservedVariables[i];
-    DebugHierarchy_InitElement(Var->Name, Var, DebugHierarchyKind_Observed);
+for(unsigned int i = 1; i <= DebugWatchCount; ++i) {
+    debug_variable *Var = &DebugWatchVariables[i];
+    DebugHierarchy_InitElement(Var->Name, Var, DebugHierarchyKind_Watch);
 }
 
 for(debug_hierarchy_el *HVar = DebugHierarchy_Next(DebugHierarchy);
@@ -202,15 +205,15 @@ for(debug_hierarchy_el *HVar = DebugHierarchy_Next(DebugHierarchy);
             }
         } break;
 
-        case DebugHierarchyKind_Live: {
+        case DebugHierarchyKind_Tweak: {
             debug_variable *Var = (debug_variable *)HVar.Data;
             InteractWithDebugVariable(Input, Var);
-            ObserveDebugVariable(OutputFormat, Var);
+            WatchDebugVariable(OutputFormat, Var);
         } break;
 
-        case DebugHierarchyKind_Observed: {
+        case DebugHierarchyKind_Watch: {
             debug_variable *Var = (debug_variable *)HVar.Data;
-            ObserveDebugVariable(OutputFormat, Var);
+            WatchDebugVariable(OutputFormat, Var);
         } break;
     }
 }

@@ -10,6 +10,7 @@ _A collection of single-header libraries to help with reloading, debugging and p
     - [DEBUG_WATCH](#debug_watch)
     - [DEBUG_TWEAK](#debug_tweak)
 - [hierarchy.h](#hierarchyh)
+- [Recommended libraries](#recommended-libraries)
 
 ## Acknowledgments
 Most of the content here used Casey Muratori's [Handmade Hero](https://www.handmadehero.org) as a starting point.
@@ -220,3 +221,8 @@ for(debug_hierarchy_el *HVar = DebugHierarchy_Next(DebugHierarchy);
 
 DEBUG_HIERARCHY_DECLARATION
 ```
+
+## Recommended libraries
+- All of the [STB single file libraries](https://github.com/nothings/stb) (he recommends others there as well)
+- My single file testing library - [`sweet.h`](https://github.com/azmr/sweet)
+- My single file header fonts - _Coming soon_

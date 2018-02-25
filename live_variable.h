@@ -9,14 +9,24 @@ TODO:
  - construct format strings from e.g. nested structs
 */
 
+/* allow for va_args to have commas replaced */
+#define _ ,
+
 #ifndef LIVE_VARIABLE_H
 #include <stdio.h>
 
-/* #if !NO_VA_ARGS */
-/* #define DEBUG_LIVE_TWEAKER DEBUG_TWEAK_NO_VA */
-/* #else */
-/* #define DEBUG_LIVE_TWEAKER DEBUG_TWEAK_VA */
-/* #endif */
+#ifndef DEBUG_ATOMIC_EXCHANGE /* user can define it to e.g. C11 atomic_exchange or Windows InterlockedExchange */
+/* sets bool to 1, evaluates to previous value of bool */
+#define DEBUG_ATOMIC_EXCHANGE(ptr, desired) DebugAtomicExchange(ptr, desired)
+/* #define DEBUG_ATOMIC_EXCHANGE(ptr, desired) (*(ptr) ? 1 : (*(ptr))++) */
+inline int
+DebugAtomicExchange(int *Val, int Desired)
+{
+	int Result = *Val;
+	*Val = Desired;
+	return Result;
+}
+#endif
 
 typedef struct debug_variable debug_variable;
 
@@ -24,30 +34,21 @@ typedef int debug_if;
 #define DEBUG_VAR_DECLARE(type, Name) static type DEBUG_LIVE_VAR_## Name
 #define DEBUG_LIVE_if(Name) if(DEBUG_LIVE_VAR_## Name)
 
-// Declare the if statement variables
+/* Declare the if statement variables */
 #define DEBUG_LIVE_IF(Name, init) DEBUG_VAR_DECLARE(debug_if, Name);
 #if NO_VA_ARGS
 #define DEBUG_LIVE_TWEAK(type, Name, init)
 #else
 #define DEBUG_LIVE_TWEAK(type, Name, ...)
-#endif//NO_VA_ARGS
-	DEBUG_LIVE_IF(Text_FlipVerticalDraw, 0)
-	DEBUG_LIVE_IF(MiscTest_IfTester, 0)
-	DEBUG_LIVE_IF(Rendering_SmallScreenBoundary, 0)
-	DEBUG_LIVE_IF(Debug_VectorCrosshairThing, 0)
-	DEBUG_LIVE_IF(Debug_PrintPointDetails, 0)
-	DEBUG_LIVE_IF(Rendering_Render, 0)
-	DEBUG_LIVE_TWEAK(f32, MiscTest_TestFloat, 999.000000f)
-	DEBUG_LIVE_TWEAK(v2, MiscTest_TestV2, { 2381.000000f, 303.000000f })
-	DEBUG_LIVE_TWEAK(v2, MiscTest_Test2V2, { 192.000000f, 694.000000f })
-	/* DEBUG_LIVE_VARS */
+#endif/*NO_VA_ARGS*/
+	DEBUG_LIVE_VARS
 #undef DEBUG_LIVE_TWEAK
 #undef DEBUG_LIVE_IF
-// from now on, treat ifs like other vars
+/* from now on, treat ifs like other vars */
 #define DEBUG_LIVE_IF(Name, init) DEBUG_LIVE_TWEAK(debug_if, Name, init)
 
 #define LIVE_VARIABLE_H
-#endif//LIVE_VARIABLE_H
+#endif/*LIVE_VARIABLE_H*/
 
 /* WATCHED ******************************************************************/
 #ifndef DEBUG_WATCHED_H
@@ -58,15 +59,19 @@ static unsigned int DebugWatchArrayLen;
 
 /* Usage:    int X = 6;    =>    DEBUG_WATCH(int, X) = 6;    */
 /* TODO: do `if` and swap as atomic operation */
-#define DEBUG_WATCH_INTERNALS(type, name, var) \
-static int DebugWatch_## var ##_NeedsInit = 1; \
-if(DebugWatch_## var ##_NeedsInit) { DEBUG_WATCH_COUNTER; \
-	DebugWatch_## var ##_NeedsInit = 0; \
+#define DEBUG_WATCH_DECLARE(type, name) static type name; static int DebugWatch_## name ##_IsInit
+#define DEBUG_WATCH_INIT(type, name)        DEBUG_WATCHED_INIT_(type, #name, name)
+#define DEBUG_WATCHED_INIT(type, name, var) DEBUG_WATCHED_INIT_(type, #name, var)
+/* if(! DebugWatch_## var ##_IsInit) { \ */
+#define DEBUG_WATCHED_INIT_(type, name, var) \
+if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
+	DebugWatch_## var ##_IsInit = 1; \
 	debug_variable DebugWatch = { DebugVarType_## type, name, &var }; \
 	DebugWatchVariables[++DebugWatchCount] = DebugWatch; \
+	DEBUG_WATCH_COUNTER; \
 }
-#define DEBUG_WATCH(type, name)        static type name; { DEBUG_WATCH_INTERNALS(type, #name,         name) } name
-#define DEBUG_WATCHED(type, path, name) static type name; { DEBUG_WATCH_INTERNALS(type, #path"_"#name, name) } name
+#define DEBUG_WATCH(type, name)         DEBUG_WATCH_DECLARE(type, name); DEBUG_WATCH_INIT(type, name) name
+#define DEBUG_WATCHED(type, path, name) DEBUG_WATCH_DECLARE(type, name); DEBUG_WATCHED_INIT(type, path ##_## name, name) name
 /* ^^^ this has the feature that it doesn't trigger a warning if unused elsewhere */
 
 #define DEBUG_WATCH_DECLARATION  \
@@ -84,9 +89,6 @@ if(DebugWatch_## var ##_NeedsInit) { DEBUG_WATCH_COUNTER; \
 #ifndef DEBUG_TYPES
 #error You have to #define DEBUG_TYPES! Do so in this format: `DEBUG_TYPE(type, printf_format_string)`
 #endif
-/* #ifndef DEBUG_TWEAK_VARS */
-/* #error You have to #define DEBUG_TWEAK_VARS! Do so in this format: `DEBUG_TWEAK_VAR(type, name)` */
-/* #endif */
 
 	/* DEBUG_TYPE(Unknown, "%d") \ */
 #define DEBUG_TWEAK_INTERNAL_TYPES \
@@ -97,9 +99,11 @@ if(DebugWatch_## var ##_NeedsInit) { DEBUG_WATCH_COUNTER; \
 	DEBUG_TYPES \
 
 /* //// Debug variable type, name and pointer to value */
-#if !NO_VA_ARGS
-#define DEBUG_TYPE_STRUCT(type, format, ...) DEBUG_TYPE(type, format)
-#endif/*!NO_VA_ARGS */
+#if NO_VA_ARGS
+#define DEBUG_TYPE_STRUCT(type, format, init) DEBUG_TYPE(type, format)
+#else
+#define DEBUG_TYPE_STRUCT(type, format, ...)  DEBUG_TYPE(type, format)
+#endif/*NO_VA_ARGS */
 typedef struct debug_variable
 {
 	enum {
@@ -109,21 +113,13 @@ typedef struct debug_variable
 #undef DEBUG_TYPE
 	} Type;
 	char *Name;
-	union {
-		void *Data; // are these below really needed?
-#define DEBUG_TYPE(type, format) \
-		type *Value_## type;
-		DEBUG_TWEAK_TYPES
-#undef DEBUG_TYPE
-	};
+	void *Data;
 } debug_variable;
-#if !NO_VA_ARGS
 #undef DEBUG_TYPE_STRUCT
-#endif/*!NO_VA_ARGS */
 
 /* //// Reference debug array instances by name */
 enum {
-	DebugLiveVarIndexEmpty,
+	DebugVarIndexEmpty,
 #if NO_VA_ARGS
 #define DEBUG_LIVE_TWEAK(type, Name, init) DebugVarIndex_## Name,
 #else
@@ -146,7 +142,7 @@ enum {
 #undef DEBUG_LIVE_TWEAK
 
 /* //// Array of annotated typed pointers to global vars */
-debug_variable DebugLiveVariables[] = {
+debug_variable DebugTweakVariables[] = {
 	{0},
 #if NO_VA_ARGS
 #define DEBUG_LIVE_TWEAK(type, Name, init) { DebugVarType_## type, #Name, (void *)&DEBUG_LIVE_VAR_## Name },
@@ -165,10 +161,11 @@ static int
 DebugLiveVar_Recompile(char *BuildCall)
 {
 	int Result = 0;
-	/* TODO: CAS */
-	if(! DebugLiveVar_IsCompiling)
+	/* if(! DebugLiveVar_IsCompiling) */
+	/* if(! (DebugLiveVar_IsCompiling == 1 ? 1 : DebugLiveVar_IsCompiling++)) */
+	if(! DEBUG_ATOMIC_EXCHANGE(&DebugLiveVar_IsCompiling, 1))
 	{
-		DebugLiveVar_IsCompiling = 1;
+		/* DebugLiveVar_IsCompiling = 1; */
 		Result = system(BuildCall);
 	}
 	return Result;
@@ -183,22 +180,22 @@ DebugLiveVar_RewriteDefines(char *Filename)
 	{
 		FILE *File = fopen(Filename, "w");
 		Result &= fprintf(File, "#ifndef LIVE_VAR_DEFINES_H\n") > 0;
-		for(u32 iVar = 0; iVar < ArrayCount(DebugLiveVariables); ++iVar)
+		for(u32 iVar = 0; iVar < ArrayCount(DebugTweakVariables); ++iVar)
 		{
-			debug_variable Var = DebugLiveVariables[iVar];
+			debug_variable Var = DebugTweakVariables[iVar];
 			switch(Var.Type)
 			{
-#if ! NO_VA_ARGS
-#define DEBUG_TYPE_MEMBER(struct, member) Var.Value_## struct->member
-#define DEBUG_TYPE_STRUCT(type, format, ...) case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, __VA_ARGS__) > 0; break;
-#endif/*! NO_VA_ARGS */
-#define DEBUG_TYPE(type, format)		case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, *Var.Value_## type) > 0; break;
+#if NO_VA_ARGS
+#define DEBUG_TYPE_STRUCT(type, format, init) case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name,        init) > 0; break;
+#else
+#define DEBUG_TYPE_STRUCT(type, format, ...)  case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, __VA_ARGS__) > 0; break;
+#endif/*NO_VA_ARGS*/
+#define DEBUG_TYPE_MEMBER(struct, member) ((struct *)Var.Data)->member
+#define DEBUG_TYPE(type, format)		case DebugVarType_## type: Result &= fprintf(File, "#define DEBUGVAR_%s "format"\n", Var.Name, *(type *)Var.Data) > 0; break;
 				DEBUG_TYPES
 #undef DEBUG_TYPE
-#if ! NO_VA_ARGS
 #undef DEBUG_TYPE_STRUCT
 #undef DEBUG_TYPE_MEMBER
-#endif/*NO_VA_ARGS == 0 */
 			}
 		}
 		Result &= fprintf(File, "#define LIVE_VAR_DEFINES_H\n#endif") > 0;
@@ -218,20 +215,20 @@ DebugLiveVar_RewriteConfig(char *Filename)
 		FILE *File = fopen(Filename, "w");
 		Result &= fprintf(File, "#ifndef LIVE_VAR_CONFIG_H\n\n#define DEBUG_LIVE_VARS \\\n") > 0;
 
-		for(u32 iVar = 1; iVar < ArrayCount(DebugLiveVariables); ++iVar)
+		for(u32 iVar = 1; iVar < ArrayCount(DebugTweakVariables); ++iVar)
 		{
-			debug_variable Var = DebugLiveVariables[iVar];
+			debug_variable Var = DebugTweakVariables[iVar];
 			switch(Var.Type)
 			{
-				case DebugVarType_debug_if: Result &= fprintf(File, "\tDEBUG_LIVE_IF(%s, %u) \\\n", Var.Name, *Var.Value_debug_if) > 0; break;
+				case DebugVarType_debug_if: Result &= fprintf(File, "\tDEBUG_LIVE_IF(%s, %u) \\\n", Var.Name, *(debug_if *)Var.Data) > 0; break;
 
-#define DEBUG_TYPE_MEMBER(struct, member) Var.Value_## struct->member
+#define DEBUG_TYPE_MEMBER(struct, member) ((struct *)Var.Data)->member
 #if NO_VA_ARGS
-#define DEBUG_TYPE_STRUCT(type, format, init) case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_TWEAK_STRUCT("#type", %s, "format") \\\n", Var.Name, init) > 0; break;
+#define DEBUG_TYPE_STRUCT(type, format, init) case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_LIVE_TWEAK("#type", %s, "format") \\\n", Var.Name, init) > 0; break;
 #else
-#define DEBUG_TYPE_STRUCT(type, format, ...) case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_TWEAK_STRUCT("#type", %s, "format") \\\n", Var.Name, __VA_ARGS__) > 0; break;
+#define DEBUG_TYPE_STRUCT(type, format, ...)  case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_LIVE_TWEAK("#type", %s, "format") \\\n", Var.Name, __VA_ARGS__) > 0; break;
 #endif/*NO_VA_ARGS */
-#define DEBUG_TYPE(type, format)             case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_TWEAK_VAR("#type", %s, "format") \\\n", Var.Name, *Var.Value_## type) > 0; break;
+#define DEBUG_TYPE(type, format)              case DebugVarType_## type: Result &= fprintf(File, "\tDEBUG_LIVE_TWEAK("#type", %s, "format") \\\n", Var.Name, *(type *)Var.Data) > 0; break;
 			DEBUG_TYPES
 #undef DEBUG_TYPE
 #undef DEBUG_TYPE_STRUCT
@@ -246,3 +243,4 @@ DebugLiveVar_RewriteConfig(char *Filename)
 #define DEBUG_TWEAK_IMPLEMENTATION_H
 #endif/*DEBUG_TWEAK_IMPLEMENTATION && !DEBUG_TWEAK_IMPLEMENTATION_H*/
 
+#undef _

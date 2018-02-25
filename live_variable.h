@@ -17,15 +17,7 @@ TODO:
 
 #ifndef DEBUG_ATOMIC_EXCHANGE /* user can define it to e.g. C11 atomic_exchange or Windows InterlockedExchange */
 /* sets bool to 1, evaluates to previous value of bool */
-#define DEBUG_ATOMIC_EXCHANGE(ptr, desired) DebugAtomicExchange(ptr, desired)
-/* #define DEBUG_ATOMIC_EXCHANGE(ptr, desired) (*(ptr) ? 1 : (*(ptr))++) */
-inline int
-DebugAtomicExchange(int *Val, int Desired)
-{
-	int Result = *Val;
-	*Val = Desired;
-	return Result;
-}
+#define DEBUG_ATOMIC_EXCHANGE(ptr, desired) (*(ptr) ? 1 : (*(ptr))++)
 #endif
 
 typedef struct debug_variable debug_variable;
@@ -59,19 +51,24 @@ static unsigned int DebugWatchArrayLen;
 
 /* Usage:    int X = 6;    =>    DEBUG_WATCH(int, X) = 6;    */
 /* TODO: do `if` and swap as atomic operation */
-#define DEBUG_WATCH_DECLARE(type, name) static type name; static int DebugWatch_## name ##_IsInit
-#define DEBUG_WATCH_INIT(type, name)        DEBUG_WATCHED_INIT_(type, #name, name)
-#define DEBUG_WATCHED_INIT(type, name, var) DEBUG_WATCHED_INIT_(type, #name, var)
-/* if(! DebugWatch_## var ##_IsInit) { \ */
-#define DEBUG_WATCHED_INIT_(type, name, var) \
+#define DEBUG_WATCH_DECL(type, name) static type name; static int DebugWatch_## name ##_IsInit
+#define DEBUG_WATCH_DEF(type, name)        DEBUG_WATCHED_INIT(type, #name, name, {0})
+#define DEBUG_WATCHED_DEF(type, name, var) DEBUG_WATCHED_INIT(type, #name, var,  {0})
+
+#define DEBUG_WATCH_INIT(type, name, ...)        DEBUG_WATCHED_INIT_(type, #name, name, __VA_ARGS__)
+#define DEBUG_WATCHED_INIT(type, name, var, ...) DEBUG_WATCHED_INIT_(type, #name, var,  __VA_ARGS__)
+#define DEBUG_WATCHED_INIT_(type, name, var, ...) \
+type DebugWatchTemp_## var = __VA_ARGS__; \
 if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
-	DebugWatch_## var ##_IsInit = 1; \
 	debug_variable DebugWatch = { DebugVarType_## type, name, &var }; \
+	var = DebugWatchTemp_## var; \
 	DebugWatchVariables[++DebugWatchCount] = DebugWatch; \
 	DEBUG_WATCH_COUNTER; \
 }
-#define DEBUG_WATCH(type, name)         DEBUG_WATCH_DECLARE(type, name); DEBUG_WATCH_INIT(type, name) name
-#define DEBUG_WATCHED(type, path, name) DEBUG_WATCH_DECLARE(type, name); DEBUG_WATCHED_INIT(type, path ##_## name, name) name
+#define DEBUG_WATCH(type, name)                 DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_DEF(type, name) name
+#define DEBUG_WATCH_EQ(type, name, ...)         DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_INIT(type, name, __VA_ARGS__)
+#define DEBUG_WATCHED(type, path, name)         DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_DEF(type, path ##_## name, name) name
+#define DEBUG_WATCHED_EQ(type, path, name, ...) DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_INIT(type, path ##_## name, name, __VA_ARGS__)
 /* ^^^ this has the feature that it doesn't trigger a warning if unused elsewhere */
 
 #define DEBUG_WATCH_DECLARATION  \
@@ -153,7 +150,6 @@ debug_variable DebugTweakVariables[] = {
 #undef DEBUG_LIVE_TWEAK
 };
 
-/* //// Compilation info */
 static int DebugLiveVar_IsCompiling;
 
 /* returns the result of the system call (where 0 is success), or 0 if no action taken */

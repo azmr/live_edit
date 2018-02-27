@@ -24,7 +24,7 @@ My implementations have diverged somewhat, but the concepts are mostly the same.
 One major difference is that these will work with C.
 (They're not all C89-compatible, as some of the implementations require declare-anywhere and/or `__VA_ARGS__`.
 Some aren't C89-compatible just because I haven't taken the time to make them so.
-File an issue or a pull request if you want this changed.)
+File an issue or a pull request if you want this changed. Ditto for C++ incompatibilities.)
 
 ## Overview of headers
 All of these can be used standalone, but they also work well together.
@@ -96,8 +96,11 @@ WATCH is there to minimize the friction involved with inspecting the state of th
 // "main.c"
 #define DEBUG_TYPES \
     DEBUG_TYPE(f32, "%ff") \
-    DEBUG_TYPE(v2, "{ %ff, %ff }", DEBUG_STRUCT(DEBUG_MEMBER(v2, X), DEBUG_MEMBER(v2, Y)))
+    DEBUG_TYPE(v2, "{ %ff, %ff }", DEBUG_MEMBER(v2, X), DEBUG_MEMBER(v2, Y))
 
+// Only need to define this if the values being watched/tweaked are declared in many threads
+// as far as I'm aware, most platforms have an atomic exchange function. This is from C11:
+#define DEBUG_ATOMIC_EXCHANGE(ValuePtr, Desired) atomic_exchange(ValuePtr, Desired)
 #include "path/to/live_variable.h"    // as long as the types are defined first
 // ...
 
@@ -131,6 +134,8 @@ TWEAK is a bit more involved than WATCH, but you get a bit more from it: you can
     DEBUG_TYPE(f32, "%ff") \
     DEBUG_TYPE_STRUCT(v2, "{ %ff, %ff }", DEBUG_MEMBER(v2, X), DEBUG_MEMBER(v2, Y))
 
+// (see above)
+#define DEBUG_ATOMIC_EXCHANGE(ValuePtr, Desired) atomic_exchange(ValuePtr, Desired)
 #include "main_live.h"
 /***/
 
@@ -177,6 +182,10 @@ I don't think I referenced it when writing my own.
 #define DEBUG_HIERARCHY_KINDS \
     DEBUG_HIERARCHY_KIND(debug_variable, Tweak) \
     DEBUG_HIERARCHY_KIND(debug_variable, Watch)
+
+// See explanation under DEBUG_WATCH for DEBUG_ATOMIC_EXCHANGE.
+// Also, only needed if using the macros, otherwise thread safety is your responsibility!
+#define DEBUG_ATOMIC_EXCHANGE(ValuePtr, Desired) atomic_exchange(ValuePtr, Desired)
 #include "path/to/hierarchy.h"
 //...
 

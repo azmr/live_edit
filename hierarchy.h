@@ -73,7 +73,11 @@ DebugHierarchy_Next(debug_hierarchy_el *Item)
 	debug_hierarchy_el *Result = 0;
 	     if(Item->FirstChild && ! Item->IsClosed) { Result = Item->FirstChild; }
 	else if(Item->NextSibling)                    { Result = Item->NextSibling; }
-	else if(Item->Parent->NextSibling)            { Result = Item->Parent->NextSibling; }
+	else while(Item->Parent)
+	{
+		if(Item->Parent->NextSibling) { Result = Item->Parent->NextSibling; break; }
+		else { Item = Item->Parent; }
+	}
 	return Result;
 }
 

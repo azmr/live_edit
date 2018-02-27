@@ -1,5 +1,6 @@
 // TODO:
 // - hash the names for faster comparison
+// - add parent node separately from name
 
 #ifndef DEBUG_HIERARCHY_H
 
@@ -13,6 +14,10 @@
 #define DEBUG_HIERARCHY_COUNTER DEBUG_HIERARCHY_MAX_LENGTH
 #else
 #define DEBUG_HIERARCHY_COUNTER __COUNTER__
+#endif
+#ifndef DEBUG_ATOMIC_EXCHANGE /* user can define it to e.g. C11 atomic_exchange or Windows InterlockedExchange */
+/* sets bool to 1, evaluates to previous value of bool */
+#define DEBUG_ATOMIC_EXCHANGE(ptr, desired) (*(ptr) ? 1 : (*(ptr))++)
 #endif
 
 typedef struct debug_hierarchy_el
@@ -179,13 +184,9 @@ DebugHierarchy_InitElement(char *Name, void *Data, int Kind)
 	return Result;
 }
 #define DEBUG_HIERARCHY_INIT_EL(name, data, kind) \
-{ \
-	static int DebugHierarchy_## name ##_NeedsInit = 1; \
-	if(DebugHierarchy_## name ##_NeedsInit) { DEBUG_HIERARCHY_COUNTER; \
-		DebugHierarchy_## name ##_NeedsInit = 0; \
-		DebugHierarchy_InitElement(#name, data, kind); \
-	} \
-} 
+	static int DebugHierarchy_## name ##_IsInit; \
+	if(! DEBUG_ATOMIC_EXCHANGE(DebugHierarchy_## name ##_IsInit)) \
+	{ DebugHierarchy_InitElement(#name, data, kind); DEBUG_HIERARCHY_COUNTER; }
 
 #define DEBUG_HIERARCHY_DECLARATION  \
 	enum { DebugHierarchy_ArrayLenEnum = 2*DEBUG_HIERARCHY_COUNTER + 1}; \

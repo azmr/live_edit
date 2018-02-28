@@ -100,6 +100,36 @@ if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
 #endif/*DEBUG_WATCHED_H*/
 /* END WATCHED **************************************************************/
 
+/* LOOP *********************************************************************/
+/* Usage: for(int i = 0; i < n; ++i)    =>    DEBUG_for(int, i = 0, i < n, ++i) */
+#ifndef DEBUG_LOOP_H
+
+#define DEBUG_FOR_CAT1(a, b) a ## b
+#define DEBUG_FOR_CAT2(a, b) DEBUG_FOR_CAT1(a, b)
+
+#if NO_DEBUG_MACROS || NO_LOOP_MACROS
+#define FRAME_for(type, init, condition, iterate) \
+	for(type init; condition; iterate)
+#else/*NO_DEBUG_MACROS || NO_LOOP_MACROS*/
+
+#define DEBUG_for(type, init, condition, iterate) DEBUG_TOGGLE_for(type, init, condition, iterate, 1)
+#define DEBUG_TOGGLE_for(type, init, condition, iterate, isdebug) \
+static type init; \
+{ \
+    static int DebugFor_IsInit; \
+    int IsDebug = isdebug; \
+	if(! DEBUG_ATOMIC_EXCHANGE(&DebugFor_IsInit, 1)) { init; } \
+    if(IsDebug) { goto DEBUG_FOR_CAT1(debug_for_label_, __LINE__); } \
+} \
+for(init; !isdebug && (condition); iterate) \
+DEBUG_FOR_CAT1(debug_for_label_, __LINE__):
+
+#endif/*NO_DEBUG_MACROS || NO_LOOP_MACROS*/
+
+#define DEBUG_LOOP_H
+#endif/*DEBUG_LOOP_H*/
+/* END LOOP *****************************************************************/
+
 /* TWEAK **********************************************************************/
 /* TODO: should I include the function definitions above? */
 #if defined(DEBUG_TWEAK_IMPLEMENTATION) && !defined(DEBUG_TWEAK_IMPLEMENTATION_H)

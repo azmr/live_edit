@@ -1,12 +1,13 @@
 /* NOTE: `#if NO_VA_ARGS == 0` is for e.g. C89, where __VA_ARGS__ is not available -> more work needed to make structs live
 TODO:
- - better accommodate C89, e.g. with STRUCT2, STRUCT3 etc
  - add known types first time (like DEBUG_LIVE_IF)
- - add C basic types
+ - add C basic types?
  - add "Leave Empty" comment under macro lists
  - allow types to be specified elsewhere?
  - watch arrays
  - construct format strings from e.g. nested structs
+ - define something to return to normal behaviour
+ - also capture __FILE__ and __LINE__
 */
 
 /* allow for va_args to have commas replaced */
@@ -43,33 +44,52 @@ typedef int debug_if;
 #endif/*LIVE_VARIABLE_H*/
 
 /* WATCHED ******************************************************************/
+/* Usage:    int X = 6;    =>    DEBUG_WATCH(int, X) = 6;    */
 #ifndef DEBUG_WATCHED_H
 #define DEBUG_WATCH_COUNTER __COUNTER__
 debug_variable DebugWatchVariables[];
 static unsigned int DebugWatchCount = 0;
 static unsigned int DebugWatchArrayLen;
 
-/* Usage:    int X = 6;    =>    DEBUG_WATCH(int, X) = 6;    */
-/* TODO: do `if` and swap as atomic operation */
-#define DEBUG_WATCH_DECL(type, name) static type name; static int DebugWatch_## name ##_IsInit
-#define DEBUG_WATCH_DEF(type, name)        DEBUG_WATCHED_INIT(type, #name, name, {0})
-#define DEBUG_WATCHED_DEF(type, name, var) DEBUG_WATCHED_INIT(type, #name, var,  {0})
+/* allows for the proper expansion */
+#define DEBUG_WATCH_STR(x) #x
 
-#define DEBUG_WATCH_INIT(type, name, ...)        DEBUG_WATCHED_INIT_(type, #name, name, __VA_ARGS__)
-#define DEBUG_WATCHED_INIT(type, name, var, ...) DEBUG_WATCHED_INIT_(type, #name, var,  __VA_ARGS__)
-#define DEBUG_WATCHED_INIT_(type, name, var, ...) \
-type DebugWatchTemp_## var = __VA_ARGS__; \
+#define DEBUG_WATCH_DEF_INIT(type, name, ...)        DEBUG_WATCHED_DEF_INIT_(type, #name, name, __VA_ARGS__)
+#define DEBUG_WATCHED_DEF_INIT(type, path, var, ...) DEBUG_WATCHED_DEF_INIT_(type, DEBUG_WATCH_STR(path ##_## var), var,  __VA_ARGS__)
+#define DEBUG_WATCH_DEF_EQ(type, name, ...)          DEBUG_WATCHED_DEF_EQ_(  type, #name, name, __VA_ARGS__)
+#define DEBUG_WATCHED_DEF_EQ(type, path, var, ...)   DEBUG_WATCHED_DEF_EQ_(  type, DEBUG_WATCH_STR(path ##_## var), var,  __VA_ARGS__)
+
+/* sets the value once - on initialization */
+#define DEBUG_WATCHED_DEF_INIT_(type, name, var, ...) \
 if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
 	debug_variable DebugWatch = { DebugVarType_## type, name, &var }; \
+	type DebugWatchTemp_## var = __VA_ARGS__; \
 	var = DebugWatchTemp_## var; \
 	DebugWatchVariables[++DebugWatchCount] = DebugWatch; \
 	DEBUG_WATCH_COUNTER; \
 }
-#define DEBUG_WATCH(type, name)                 DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_DEF(type, name) name
-#define DEBUG_WATCH_EQ(type, name, ...)         DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_INIT(type, name, __VA_ARGS__)
-#define DEBUG_WATCHED(type, path, name)         DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_DEF(type, path ##_## name, name) name
-#define DEBUG_WATCHED_EQ(type, path, name, ...) DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_INIT(type, path ##_## name, name, __VA_ARGS__)
-/* ^^^ this has the feature that it doesn't trigger a warning if unused elsewhere */
+/* sets the value every time through */
+#define DEBUG_WATCHED_DEF_EQ_(type, name, var, ...) \
+{ type DebugWatchTemp_## var = __VA_ARGS__; var = DebugWatchTemp_## var; } \
+if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
+	debug_variable DebugWatch = { DebugVarType_## type, name, &var }; \
+	DebugWatchVariables[++DebugWatchCount] = DebugWatch; \
+	DEBUG_WATCH_COUNTER; \
+}
+
+/* separating declaration and definition allows use without declare-anywhere */
+#define DEBUG_WATCH_DECL(type, name) static type name; static int DebugWatch_## name ##_IsInit
+#define DEBUG_WATCH_DEF(type, name)        DEBUG_WATCHED_DEF_INIT(type, name, name, {0})
+#define DEBUG_WATCHED_DEF(type, name, var) DEBUG_WATCHED_DEF_INIT(type, name, var,  {0})
+	
+/* typical use: */
+#define DEBUG_WATCH(type, name)                   DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_DEF(type, name) name
+#define DEBUG_WATCHED(type, path, name)           DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_DEF(type, path ##_## name, name) name
+#define DEBUG_WATCH_INIT(type, name, ...)         DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_DEF_INIT(type, name, __VA_ARGS__)
+#define DEBUG_WATCHED_INIT(type, path, name, ...) DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_DEF_INIT(type, path ##_## name, name, __VA_ARGS__)
+#define DEBUG_WATCH_EQ(type, name, ...)           DEBUG_WATCH_DECL(type, name); DEBUG_WATCH_DEF_EQ(type, name, __VA_ARGS__)
+#define DEBUG_WATCHED_EQ(type, path, name, ...)   DEBUG_WATCH_DECL(type, name); DEBUG_WATCHED_DEF_EQ(type, path ##_## name, name, __VA_ARGS__)
+/* ^^^ suffixing with the name has the feature that it doesn't trigger a warning if unused elsewhere */
 
 #define DEBUG_WATCH_DECLARATION  \
 	enum { DebugWatchArrayLenEnum = DEBUG_WATCH_COUNTER + 1 }; \

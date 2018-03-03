@@ -83,7 +83,7 @@ if(! DEBUG_ATOMIC_EXCHANGE(&DebugWatch_## var ##_IsInit, 1)) { \
 /* separating declaration and definition allows use without declare-anywhere */
 #define DEBUG_WATCH_DECL(type, name)        static type name; static int DebugWatch_## name ##_IsInit
 #define DEBUG_WATCH_DECL_ARR(type, name, n) static type name n; static int DebugWatch_## name ##_IsInit
-#define DEBUG_WATCH_DEF(type, name)         DEBUG_WATCHED_DEF_INIT(type, name, name, {0})
+#define DEBUG_WATCH_DEF(type, name)         DEBUG_WATCH_DEF_INIT(type, name, {0})
 #define DEBUG_WATCHED_DEF(type, name, var)  DEBUG_WATCHED_DEF_INIT(type, name, var,  {0})
 	
 /* typical use: */

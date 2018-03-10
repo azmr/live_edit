@@ -33,13 +33,8 @@ typedef struct debug_hierarchy_el
 	struct debug_hierarchy_el *Parent;
 	struct debug_hierarchy_el *FirstChild;
 	struct debug_hierarchy_el *NextSibling;
-	union {
-		void *Data;
-		int IsClosed;
-#define DEBUG_HIERARCHY_KIND(type, kind) type *kind;
-		DEBUG_HIERARCHY_KINDS
-#undef  DEBUG_HIERARCHY_KIND
-	};
+	void *Data;
+	int IsClosed;
 } debug_hierarchy_el;
 
 
@@ -115,12 +110,13 @@ DebugHierarchy_AppendChild(debug_hierarchy_el *Parent, debug_hierarchy_el *Appen
 // returns 1 if new element was added, 0 if found an existing element
 // puts pointer to element added (or existing equivalent element) in Location
 static int
-DebugHierarchy_AddUniqueEl(debug_hierarchy_el *Hierarchy, unsigned int *Count, unsigned int MaxLen,
-                           debug_hierarchy_el El, debug_hierarchy_el **Location)
+DebugHierarchy_AddUniqueEl(debug_hierarchy_el *Hierarchy, debug_hierarchy_el *DefaultParent,
+							unsigned int *Count, unsigned int MaxLen,
+							debug_hierarchy_el El, debug_hierarchy_el **Location)
 {
 	int AlreadyAdded = 0;
-	if(! El.Parent)               // if no real parent,
-	{ El.Parent = Hierarchy; }    // set the parent to the root
+	if(! El.Parent)
+	{ El.Parent = DefaultParent; }
 	for(unsigned int i = 0, N = *Count; i <= N; ++i)
 	{
 		if(DebugHierarchy_Equal(El, Hierarchy[i]))
@@ -150,8 +146,9 @@ DebugHierarchy_AddUniqueEl(debug_hierarchy_el *Hierarchy, unsigned int *Count, u
 }
 
 static debug_hierarchy_el *
-DebugHierarchy_InitElement(char *Name, void *Data, int Kind)
+DebugHierarchy_InitElement(char *Name, void *Data, int Kind, debug_hierarchy_el *Parent)
 {
+	if(! Parent) { Parent = DebugHierarchy; }
 	char *LevelName = Name;
 	debug_hierarchy_el Group = {0};
 	for(char *At = Name; *At; ++At)
@@ -159,7 +156,7 @@ DebugHierarchy_InitElement(char *Name, void *Data, int Kind)
 		if(*At == '_' && Group.NameLength && At[1]) // not the end of the string or repeated '_'
 		{
 			Group.Name = LevelName;
-			if(DebugHierarchy_AddUniqueEl(DebugHierarchy, &DebugHierarchyCount,
+			if(DebugHierarchy_AddUniqueEl(DebugHierarchy, Parent, &DebugHierarchyCount,
 						DebugHierarchy_ArrayLen, Group, &Group.Parent))
 			{ DebugHierarchy_AppendChild(Group.Parent->Parent, Group.Parent); }
 
@@ -177,16 +174,17 @@ DebugHierarchy_InitElement(char *Name, void *Data, int Kind)
 	Group.Kind = Kind;
 	Group.Name = LevelName;
 	debug_hierarchy_el *Result = 0;
-	DebugHierarchy_AddUniqueEl(DebugHierarchy, &DebugHierarchyCount,
+	DebugHierarchy_AddUniqueEl(DebugHierarchy, Parent, &DebugHierarchyCount,
 	                           DebugHierarchy_ArrayLen, Group, &Result);
 	DebugHierarchy_AppendChild(Result->Parent, Result);
 
+	Assert(Result->Parent != Result->NextSibling);
 	return Result;
 }
 #define DEBUG_HIERARCHY_INIT_EL(name, data, kind) \
 	static int DebugHierarchy_## name ##_IsInit; \
 	if(! DEBUG_ATOMIC_EXCHANGE(DebugHierarchy_## name ##_IsInit)) \
-	{ DebugHierarchy_InitElement(#name, data, kind); DEBUG_HIERARCHY_COUNTER; }
+	{ DebugHierarchy_InitElement(#name, data, kind, 0); DEBUG_HIERARCHY_COUNTER; }
 
 #define DEBUG_HIERARCHY_DECLARATION  \
 	enum { DebugHierarchy_ArrayLenEnum = 2*DEBUG_HIERARCHY_COUNTER + 1}; \

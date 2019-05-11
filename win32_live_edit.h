@@ -1,131 +1,63 @@
-/* TODO:
- *  - non-function symbols
- *  - stop copying dlls - user can deal with making a temp
+/* NOTE:
+ *  - path => C:\Documents\my_file.txt
+ *  - dir  => C:\Documents\
+ *  - name => myfile.txt
  */
 
 #ifndef WIN32_LIVE_EDIT_H
-#ifndef Assert
 #include <assert.h>
-#define Assert assert
-#endif
 
-typedef void void_func();
-typedef int b32;
-typedef unsigned int uint;
+typedef void VoidFn();
 
-typedef struct library_symbol
+typedef struct LiveEditLibSym
 {
-	char *Name;
+	char *name;
 	union {
-		void_func *Function;
-		void *Data;
-	} Symbol;
-} library_symbol;
+		VoidFn *function;
+		void *data;
+	}; // symbol;
+} LiveEditLibSym;
 
-#define WIN32_STATE_FILE_NAME_COUNT MAX_PATH
-typedef struct exe_info
-{
-	char PathName[WIN32_STATE_FILE_NAME_COUNT];
-	char *Filename_FromPath; // Points to the char after the last \ in the pathname
-} exe_info;
 
-typedef struct lib_filepaths
-{
-	char SourceDLL[WIN32_STATE_FILE_NAME_COUNT];
-	char TempDLL[WIN32_STATE_FILE_NAME_COUNT];
-	char Lock[WIN32_STATE_FILE_NAME_COUNT];
-} lib_filepaths;
+typedef enum LiveEditPathType {
+	LIVE_EDIT_REL_PATH,
+	LIVE_EDIT_ABS_PATH,
+} LiveEditPathType;
 
-typedef struct win32_library
+// NOTE: Never use MAX_PATH in code that is user-facing, because it
+// can be dangerous and lead to bad results.
+#define LIVE_EDIT_MAX_PATH MAX_PATH
+
+typedef struct LiveEditLib
 {
-	HMODULE CodeDLL;
-	FILETIME DLLLastWriteTime;
+	HMODULE dll;
+	FILETIME dll_last_write_time;
 
 	// IMPORTANT: callbacks can be 0! Check before calling.
-	uint NumFunctions;
-	library_symbol *Functions;
+	unsigned int syms_n;
+	LiveEditLibSym *syms;
 
-	lib_filepaths Paths;
-	exe_info EXE;
+	struct {
+		char dll[LIVE_EDIT_MAX_PATH];
+		char lock[LIVE_EDIT_MAX_PATH];
+	} paths;
 
-	b32 IsValid;
-} win32_library;
+	int is_valid;
+} LiveEditLib;
 
+// concatenates dir with name to make path
 static void
-CatStrings(size_t SourceACount, char *SourceA,
-		   size_t SourceBCount, char *SourceB,
-		   size_t DestCount, char *Dest)
+Win32PathFromDirName(char *dir_str, size_t dir_str_len, char *name_str, char *path_buf, size_t path_buf_len)
 {
-	// TODO: Dest bounds checking!
-	assert(DestCount >= SourceACount + SourceBCount + 1);
-	for(int Index = 0;
-			Index < SourceACount;
-			++Index)
-	{
-		*Dest++ = *SourceA++;
-	}
+	size_t Count = 0;
+	for(size_t i = 0; i < dir_str_len && Count++ <= path_buf_len; ++i)
+	{ *path_buf++ = *dir_str++; }
 
-	for(int Index = 0;
-			Index < SourceBCount;
-			++Index)
-	{
-		*Dest++ = *SourceB++;
-	}
+	while(*name_str && Count++ <= path_buf_len)
+	{ *path_buf++ = *name_str++; }
 
-	*Dest++ = 0;
-}
-
-static int
-StringCopy(char *Dest, char *Src)
-{
-	int Count = 0;
-	while(*Src)
-	{
-		*Dest++ = *Src++;
-		++Count;
-	}
-	return Count;
-}
-
-static int
-StringLength(char *String)
-{
-	int Count = 0;
-	while(*String++) { ++Count; }
-	return Count;
-}
-
-/// Finds file with name in same path as String
-// "DirNameFromPath"?
-static void
-Win32BuildPathFilename(char *String, char *LastChar, char *Filename,
-						  int DestCount, char *Dest)
-{
-	size_t PathLength = LastChar - String;
-	CatStrings(PathLength, String,
-			   StringLength(Filename), Filename,
-			   DestCount, Dest);
-}
-
-/// Fills String with name of currently running executable
-// TODO: GetEXEInfo? return exe_info
-static void
-Win32GetEXEFilename(char *PathNameBuf, int StringLen, char **Filename)
-{
-	// NOTE: Never use MAX_PATH in code that is user-facing, because it
-	// can be dangerous and lead to bad results.
-	//DWORD SizeOfFilename =
-		GetModuleFileName(0, PathNameBuf, StringLen);
-	*Filename = PathNameBuf;
-	for(char *Scan = PathNameBuf;
-			*Scan;
-			++Scan)
-	{
-		if(*Scan == '\\')
-		{
-			*Filename = Scan + 1;
-		}
-	}
+	assert(Count < path_buf_len);
+	*path_buf = 0;
 }
 
 static inline FILETIME
@@ -134,130 +66,120 @@ le__Get_last_write_time(char *Filename)
 	FILETIME LastWriteTime = {0};
 
 	WIN32_FILE_ATTRIBUTE_DATA Data;
-	if(GetFileAttributesEx(Filename, GetFileExInfoStandard, &Data))
+	if (GetFileAttributesEx(Filename, GetFileExInfoStandard, &Data))
 	{ LastWriteTime = Data.ftLastWriteTime; }
 
 	return LastWriteTime;
 }
 
-static inline b32
+static inline int
 le__file_is_present(char *file_path)
 {
 	WIN32_FILE_ATTRIBUTE_DATA Ignored;
-	return !!GetFileAttributesEx(file_path, GetFileExInfoStandard, &Ignored);
+	return file_path && GetFileAttributesEx(file_path, GetFileExInfoStandard, &Ignored);
 }
 
 /// 1 for success, 0 for failure
-static b32
-Win32LoadLib(win32_library *Lib)
+static int
+Win32LoadLib(LiveEditLib *lib)
 {
-	if(! le__file_is_present(Lib->Paths.Lock))
+	if (! le__file_is_present(lib->paths.lock)) // don't try and load while the lock file is there
 	{
-		Lib->DLLLastWriteTime = le__Get_last_write_time(Lib->Paths.SourceDLL);
+		lib->dll_last_write_time = le__Get_last_write_time(lib->paths.dll);
 
-		int CopySuccess = CopyFile(Lib->Paths.SourceDLL, Lib->Paths.TempDLL, FALSE);
-
-		Lib->CodeDLL = LoadLibrary(Lib->Paths.TempDLL);
+		lib->dll = LoadLibrary(lib->paths.dll);
 		// NOTE: if this fails, you may be trying to load an invalid path
-		if(Lib->CodeDLL && CopySuccess)
+		if (! lib->dll) {
+			int err = GetLastError(); err;
+			assert(0);
+		}
+
+		lib->is_valid = 1;
+		for(unsigned int sym_i = 0; sym_i < lib->syms_n; ++sym_i)
 		{
-			Lib->IsValid = 1;
-			for(uint sym_i = 0; sym_i < Lib->NumFunctions; ++sym_i)
-			{
-				Lib->Functions[sym_i].Function = (void_func *)
-					GetProcAddress(Lib->CodeDLL, Lib->Functions[sym_i].Name);
+			lib->syms[sym_i].function = GetProcAddress(lib->dll, lib->syms[sym_i].name);
 
-				// NOTE: if this triggers, you may not be exporting the function
-				// from the dll
-				if(! Lib->Functions[sym_i].Function) { Lib->IsValid = 0; }
-			}
-		}
-		else {
-			int ErrCode = GetLastError();
-			ErrCode += 0; // just for debugging, so that it is still in scope after being set
+			// NOTE: if this fails, check you are exporting the function from the dll
+			assert(lib->syms[sym_i].function); //{   lib->is_valid = 0;   }
 		}
 	}
 
-	if(! Lib->IsValid)
-	{
-		// TODO: invalidate each function individually? does that even make sense?
-		/* for(uint sym_i = 0; sym_i < Lib->NumFunctions; ++sym_i) */
-		/* { */
-		/* 	Lib->Functions[sym_i].Function = 0; */
-		/* } */
-		return 0;
-	}
-
-	return 1;
+	assert(lib->is_valid);
+	return !! lib->is_valid;
 }
 
 static void
-Win32UnloadLib(win32_library *Lib)
+Win32UnloadLib(LiveEditLib *lib)
 {
-	if(Lib->CodeDLL)
-	{
-		FreeLibrary(Lib->CodeDLL);
-		Lib->CodeDLL = 0;
-	}
+	if (lib->dll)
+	{   FreeLibrary(lib->dll);   }
 
-	Lib->IsValid = 0;
-	for(uint sym_i = 0; sym_i < Lib->NumFunctions; ++sym_i)
-	{
-		Lib->Functions[sym_i].Function = 0;
-	}
+	for(unsigned int sym_i = 0; sym_i < lib->syms_n; ++sym_i)
+	{   lib->syms[sym_i].function = 0;   }
+
+	lib->is_valid = 0;
+	lib->dll      = 0;
 }
 
-static void
-Win32GetLibraryPaths(win32_library *Lib, char *SourceDLL, char *TempDLL, char *Lock)
+static int
+Win32ReloadLibOnRecompile(LiveEditLib *lib)
 {
-	Win32BuildPathFilename(Lib->EXE.PathName, Lib->EXE.Filename_FromPath, SourceDLL,
-			     		  sizeof(Lib->Paths.SourceDLL), Lib->Paths.SourceDLL);
-	Win32BuildPathFilename(Lib->EXE.PathName, Lib->EXE.Filename_FromPath, TempDLL,
-			     		  sizeof(Lib->Paths.TempDLL), Lib->Paths.TempDLL);
-	Win32BuildPathFilename(Lib->EXE.PathName, Lib->EXE.Filename_FromPath, Lock,
-						  sizeof(Lib->Paths.Lock), Lib->Paths.Lock);
-}
-
-static b32
-Win32ReloadLibOnRecompile(win32_library *Lib)
-{
-	b32 LibLoaded = 0;
-	FILETIME new_dll_write_time = le__Get_last_write_time(Lib->Paths.SourceDLL);
-	b32 dll_has_been_changed    = CompareFileTime(&new_dll_write_time, &Lib->DLLLastWriteTime) != 0;
-	b32 lock_has_been_removed   = ! le__file_is_present(Lib->Paths.Lock);
+	int LibLoaded = 0;
+	FILETIME new_dll_write_time = le__Get_last_write_time(lib->paths.dll);
+	int dll_has_been_changed    = CompareFileTime(&new_dll_write_time, &lib->dll_last_write_time) != 0;
+	int lock_has_been_removed   = ! le__file_is_present(lib->paths.lock);
 	// See if file has been changed and the lockfile has been removed
-	if(dll_has_been_changed && lock_has_been_removed)
+	if (dll_has_been_changed && lock_has_been_removed)
 	{
-		Win32UnloadLib(Lib);
-		LibLoaded = Win32LoadLib(Lib);
-		Assert(LibLoaded);
+		Win32UnloadLib(lib);
+		LibLoaded = Win32LoadLib(lib);
 	}
 	return LibLoaded;
 }
 
-static win32_library
-Win32Library(library_symbol *fns, uint fns_n,
-			b32 CompletePaths, char *SourcePath, char *TempPath, char *LockPath)
+static void le__strcpy(char *Dest, char *Src) { while(*Src) { *Dest++ = *Src++; } }
+
+static LiveEditLib
+Win32Library(LiveEditLibSym *syms, unsigned int syms_n, LiveEditPathType path_type,
+			char *dll_path, char *lock_path)
 {
-	win32_library Lib = {0};
-	{
-		Lib.NumFunctions = syms_n;
-		Lib.Functions = syms;
-	}
-	Win32GetEXEFilename(Lib.EXE.PathName, sizeof(Lib.EXE.PathName), &Lib.EXE.Filename_FromPath);
+	LiveEditLib lib = {0};
+	lib.syms_n = syms_n;
+	lib.syms = syms;
 
-	if(CompletePaths)
+	assert(dll_path);
+	if (path_type == LIVE_EDIT_ABS_PATH)
 	{
-		StringCopy(Lib.Paths.SourceDLL, SourcePath);
-		StringCopy(Lib.Paths.TempDLL, TempPath);
-		StringCopy(Lib.Paths.Lock, LockPath);
+		le__strcpy(lib.paths.dll, dll_path);
+		if (lock_path)
+		{   le__strcpy(lib.paths.lock, lock_path);   }
 	}
+
 	else
-	{
-		Win32GetLibraryPaths(&Lib, SourcePath, TempPath, LockPath);
+	{ // construct utility paths from names and exe path
+		char exe_path[LIVE_EDIT_MAX_PATH];
+		char *exe_name_from_path = exe_path; // Points to the char after the last \ in exe_path
+		unsigned int path_str_len = 0;
+		{ // Get name and path for currently running exe
+			path_str_len = GetModuleFileName(0, exe_path, sizeof(exe_path));
+			assert(path_str_len);
+			if (path_str_len == sizeof(exe_path)) // maybe perfectly filled, or maybe truncated
+			{   assert(GetLastError() != ERROR_INSUFFICIENT_BUFFER);   }
+
+			for(char *at = exe_path; *at; ++at)
+			{
+				if (*at == '\\')
+				{ exe_name_from_path = at + 1; } // this may be '\0' (an empty string), which is intentional
+			}
+		}
+		size_t dir_str_len = exe_name_from_path - exe_path;
+
+		Win32PathFromDirName(exe_path, dir_str_len, dll_path, lib.paths.dll, sizeof(lib.paths.dll));
+		if (lock_path)
+		{   Win32PathFromDirName(exe_path, dir_str_len, lock_path, lib.paths.lock, sizeof(lib.paths.lock));   }
 	}
 
-	return Lib;
+	return lib;
 }
 
 #define WIN32_LIVE_EDIT_H

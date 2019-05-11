@@ -19,6 +19,9 @@
 /* sets bool to 1, evaluates to previous value of bool */
 #define DEBUG_ATOMIC_EXCHANGE(ptr, desired) (*(ptr) ? 1 : (*(ptr))++)
 #endif
+#ifndef DEBUG_HIERARCHY_MULTIPLE
+#define DEBUG_HIERARCHY_MULTIPLE 3
+#endif//DEBUG_HIERARCHY_MULTIPLE
 
 typedef struct debug_hierarchy_el
 {
@@ -54,7 +57,7 @@ static int
 DebugHierarchy_Equal(debug_hierarchy_el El1, debug_hierarchy_el El2)
 {
 	int Result = 0;
-	if(El1.NameLength == El2.NameLength && El1.Parent == El2.Parent)// && Kind?
+	if(El1.NameLength == El2.NameLength)
 	{
 		Result = 1;
 		unsigned int At = El1.NameLength;
@@ -187,7 +190,7 @@ DebugHierarchy_InitElement(char *Name, void *Data, int Kind, debug_hierarchy_el 
 	{ DebugHierarchy_InitElement(#name, data, kind, 0); DEBUG_HIERARCHY_COUNTER; }
 
 #define DEBUG_HIERARCHY_DECLARATION  \
-	enum { DebugHierarchy_ArrayLenEnum = 2*DEBUG_HIERARCHY_COUNTER + 1}; \
+	enum { DebugHierarchy_ArrayLenEnum = DEBUG_HIERARCHY_MULTIPLE * DEBUG_HIERARCHY_COUNTER + 1}; \
 	debug_hierarchy_el DebugHierarchy[DebugHierarchy_ArrayLenEnum]; \
 	unsigned int DebugHierarchy_ArrayLen = DebugHierarchy_ArrayLenEnum;
 

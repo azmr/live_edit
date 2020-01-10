@@ -18,11 +18,16 @@ typedef struct LiveEditLibSym
 	}; // symbol;
 } LiveEditLibSym;
 
-
 typedef enum LiveEditPathType {
 	LIVE_EDIT_REL_PATH,
 	LIVE_EDIT_ABS_PATH,
 } LiveEditPathType;
+
+typedef enum LiveEditCopy {
+	LIVE_EDIT_COPY_NONE,
+	LIVE_EDIT_COPY_LOCAL,
+	LIVE_EDIT_COPY_TEMP_DIR,
+} LiveEditCopy;
 
 // NOTE: Never use MAX_PATH in code that is user-facing, because it
 // can be dangerous and lead to bad results.
@@ -42,7 +47,7 @@ typedef struct LiveEditLib
 		char lock[LIVE_EDIT_MAX_PATH];
 	} paths;
 
-	int is_valid;
+	int has_symbols;
 } LiveEditLib;
 
 // concatenates dir with name to make path
@@ -66,7 +71,7 @@ le__Get_last_write_time(char *Filename)
 	FILETIME LastWriteTime = {0};
 
 	WIN32_FILE_ATTRIBUTE_DATA Data;
-	if (GetFileAttributesEx(Filename, GetFileExInfoStandard, &Data))
+	if (GetFileAttributesExA(Filename, GetFileExInfoStandard, &Data))
 	{ LastWriteTime = Data.ftLastWriteTime; }
 
 	return LastWriteTime;
@@ -76,36 +81,61 @@ static inline int
 le__file_is_present(char *file_path)
 {
 	WIN32_FILE_ATTRIBUTE_DATA Ignored;
-	return file_path && GetFileAttributesEx(file_path, GetFileExInfoStandard, &Ignored);
+	return file_path && GetFileAttributesExA(file_path, GetFileExInfoStandard, &Ignored);
 }
 
 /// 1 for success, 0 for failure
 static int
-Win32LoadLib(LiveEditLib *lib)
+Win32LoadLib(LiveEditLib *lib, LiveEditCopy copy_kind)
 {
 	if (! le__file_is_present(lib->paths.lock)) // don't try and load while the lock file is there
 	{
+		char *dll_path = lib->paths.dll;
+		char tmp_dll_buf[MAX_PATH + 1];
+
 		lib->dll_last_write_time = le__Get_last_write_time(lib->paths.dll);
 
-		lib->dll = LoadLibrary(lib->paths.dll);
+        if (copy_kind)
+        {
+            char tmp_dir[MAX_PATH + 1] = ".";
+
+            assert(copy_kind == LIVE_EDIT_COPY_LOCAL ||
+                   copy_kind == LIVE_EDIT_COPY_TEMP_DIR);
+            if (copy_kind == LIVE_EDIT_COPY_TEMP_DIR)
+            {   GetTempPathA(sizeof(tmp_dir), tmp_dir);   }
+
+            UINT tmp_ok = GetTempFileNameA(tmp_dir, "wbt", 0, tmp_dll_buf);
+            assert(tmp_ok);
+
+            if (! CopyFileA(dll_path, tmp_dll_buf, 0))
+            {
+                int err = GetLastError();
+                assert(!"copy failed");
+                err++;
+            }
+
+            dll_path = tmp_dll_buf;
+        }
+
+		lib->dll = LoadLibraryA(dll_path);
 		// NOTE: if this fails, you may be trying to load an invalid path
 		if (! lib->dll) {
-			int err = GetLastError(); err;
+			int err = GetLastError(); (void)err;
 			assert(0);
 		}
 
-		lib->is_valid = 1;
+		lib->has_symbols = 1;
 		for(unsigned int sym_i = 0; sym_i < lib->syms_n; ++sym_i)
 		{
-			lib->syms[sym_i].function = GetProcAddress(lib->dll, lib->syms[sym_i].name);
+			lib->syms[sym_i].function = (VoidFn *)GetProcAddress(lib->dll, lib->syms[sym_i].name);
 
 			// NOTE: if this fails, check you are exporting the function from the dll
-			assert(lib->syms[sym_i].function); //{   lib->is_valid = 0;   }
+			assert(lib->syms[sym_i].function); //{   lib->has_symbols = 0;   }
 		}
 	}
 
-	assert(lib->is_valid);
-	return !! lib->is_valid;
+	assert(lib->has_symbols);
+	return !! lib->has_symbols;
 }
 
 static void
@@ -117,12 +147,12 @@ Win32UnloadLib(LiveEditLib *lib)
 	for(unsigned int sym_i = 0; sym_i < lib->syms_n; ++sym_i)
 	{   lib->syms[sym_i].function = 0;   }
 
-	lib->is_valid = 0;
-	lib->dll      = 0;
+	lib->has_symbols = 0;
+	lib->dll         = 0;
 }
 
 static int
-Win32ReloadLibOnRecompile(LiveEditLib *lib)
+Win32ReloadLibOnRecompile(LiveEditLib *lib, LiveEditCopy copy_kind)
 {
 	int LibLoaded = 0;
 	FILETIME new_dll_write_time = le__Get_last_write_time(lib->paths.dll);
@@ -132,20 +162,21 @@ Win32ReloadLibOnRecompile(LiveEditLib *lib)
 	if (dll_has_been_changed && lock_has_been_removed)
 	{
 		Win32UnloadLib(lib);
-		LibLoaded = Win32LoadLib(lib);
+		LibLoaded = Win32LoadLib(lib, copy_kind);
 	}
 	return LibLoaded;
 }
 
 static void le__strcpy(char *Dest, char *Src) { while(*Src) { *Dest++ = *Src++; } }
 
+// TODO: fail (or provide some feedback) if dll doesn't exist
 static LiveEditLib
 Win32Library(LiveEditLibSym *syms, unsigned int syms_n, LiveEditPathType path_type,
 			char *dll_path, char *lock_path)
 {
 	LiveEditLib lib = {0};
 	lib.syms_n = syms_n;
-	lib.syms = syms;
+	lib.syms   = syms;
 
 	assert(dll_path);
 	if (path_type == LIVE_EDIT_ABS_PATH)
@@ -161,7 +192,7 @@ Win32Library(LiveEditLibSym *syms, unsigned int syms_n, LiveEditPathType path_ty
 		char *exe_name_from_path = exe_path; // Points to the char after the last \ in exe_path
 		unsigned int path_str_len = 0;
 		{ // Get name and path for currently running exe
-			path_str_len = GetModuleFileName(0, exe_path, sizeof(exe_path));
+			path_str_len = GetModuleFileNameA(0, exe_path, sizeof(exe_path));
 			assert(path_str_len);
 			if (path_str_len == sizeof(exe_path)) // maybe perfectly filled, or maybe truncated
 			{   assert(GetLastError() != ERROR_INSUFFICIENT_BUFFER);   }
@@ -178,6 +209,8 @@ Win32Library(LiveEditLibSym *syms, unsigned int syms_n, LiveEditPathType path_ty
 		if (lock_path)
 		{   Win32PathFromDirName(exe_path, dir_str_len, lock_path, lib.paths.lock, sizeof(lib.paths.lock));   }
 	}
+
+	assert(le__file_is_present(lib.paths.dll));
 
 	return lib;
 }

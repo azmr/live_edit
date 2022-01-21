@@ -104,6 +104,7 @@ Win32LoadLib(LiveEditLib *lib, LiveEditCopy copy_kind)
             if (copy_kind == LIVE_EDIT_COPY_TEMP_DIR)
             {   GetTempPathA(sizeof(tmp_dir), tmp_dir);   }
 
+            // TODO: use CreateFile("%TEMP\\...", ... FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | ...)
             UINT tmp_ok = GetTempFileNameA(tmp_dir, "wbt", 0, tmp_dll_buf);
             assert(tmp_ok);
 

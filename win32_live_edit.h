@@ -45,6 +45,7 @@ typedef struct LiveEditLib
     struct {
         char dll[LIVE_EDIT_MAX_PATH];
         char lock[LIVE_EDIT_MAX_PATH];
+        int  dll_dir_len;
     } paths;
 
     int has_symbols;
@@ -97,12 +98,18 @@ Win32LoadLib(LiveEditLib *lib, LiveEditCopy copy_kind)
 
         if (copy_kind)
         {
-            char tmp_dir[MAX_PATH + 1] = ".";
+            char tmp_dir[MAX_PATH + 1];
 
-            assert(copy_kind == LIVE_EDIT_COPY_LOCAL ||
-                   copy_kind == LIVE_EDIT_COPY_TEMP_DIR);
-            if (copy_kind == LIVE_EDIT_COPY_TEMP_DIR)
-            {   GetTempPathA(sizeof(tmp_dir), tmp_dir);   }
+            switch (copy_kind)
+            {
+                case LIVE_EDIT_COPY_TEMP_DIR: GetTempPathA(sizeof(tmp_dir), tmp_dir); break;
+                case LIVE_EDIT_COPY_LOCAL: {
+                    memcpy(tmp_dir, lib->paths.dll, lib->paths.dll_dir_len);
+                    tmp_dir[lib->paths.dll_dir_len] = '\0';
+                } break;
+
+                default: fprintf(stderr, "Unknown copy kind: %d\n", copy_kind); assert(0);
+            }
 
             // TODO: use CreateFile("%TEMP\\...", ... FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE | ...)
             UINT tmp_ok = GetTempFileNameA(tmp_dir, "wbt", 0, tmp_dll_buf);
@@ -204,11 +211,11 @@ Win32Library(LiveEditLibSym *syms, unsigned int syms_n, LiveEditPathType path_ty
                 { exe_name_from_path = at + 1; } // this may be '\0' (an empty string), which is intentional
             }
         }
-        size_t dir_str_len = exe_name_from_path - exe_path;
+        lib.paths.dll_dir_len = exe_name_from_path - exe_path;
 
-        Win32PathFromDirName(exe_path, dir_str_len, dll_path, lib.paths.dll, sizeof(lib.paths.dll));
+        Win32PathFromDirName(exe_path, lib.paths.dll_dir_len, dll_path, lib.paths.dll, sizeof(lib.paths.dll));
         if (lock_path)
-        {   Win32PathFromDirName(exe_path, dir_str_len, lock_path, lib.paths.lock, sizeof(lib.paths.lock));   }
+        {   Win32PathFromDirName(exe_path, lib.paths.dll_dir_len, lock_path, lib.paths.lock, sizeof(lib.paths.lock));   }
     }
 
     assert(le__file_is_present(lib.paths.dll));
